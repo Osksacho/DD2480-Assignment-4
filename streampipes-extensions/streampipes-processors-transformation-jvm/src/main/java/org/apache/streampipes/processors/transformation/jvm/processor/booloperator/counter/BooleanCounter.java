@@ -79,10 +79,14 @@ public class BooleanCounter implements EventProcessor<BooleanCounterParameters> 
     if (updateCounter) {
       this.counter++;
       inputEvent.addField(BooleanCounterController.COUNT_FIELD_RUNTIME_NAME, this.counter);
-      out.collect(inputEvent);
+      if(out != null) out.collect(inputEvent);
     }
 
     this.fieldValueOfLastEvent = value;
+  }
+
+  public int getCounter(){
+    return this.counter;
   }
 
   @Override
