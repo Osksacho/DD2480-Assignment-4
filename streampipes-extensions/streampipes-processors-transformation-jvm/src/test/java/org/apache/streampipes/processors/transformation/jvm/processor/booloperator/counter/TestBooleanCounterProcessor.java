@@ -20,19 +20,17 @@ import org.apache.streampipes.commons.exceptions.SpRuntimeException;
 import org.apache.streampipes.messaging.InternalEventProcessor;
 import org.apache.streampipes.model.graph.DataProcessorDescription;
 import org.apache.streampipes.model.graph.DataProcessorInvocation;
-import org.apache.streampipes.model.grounding.TransportProtocol;
 import org.apache.streampipes.model.runtime.Event;
 import org.apache.streampipes.model.runtime.EventFactory;
 import org.apache.streampipes.model.runtime.SchemaInfo;
 import org.apache.streampipes.model.runtime.SourceInfo;
-import org.apache.streampipes.model.util.ElementIdGenerator;
+import org.apache.streampipes.model.staticproperty.*;
 import org.apache.streampipes.test.generator.EventStreamGenerator;
 import org.apache.streampipes.test.generator.InvocationGraphGenerator;
 import org.apache.streampipes.test.generator.grounding.EventGroundingGenerator;
 
 import org.apache.streampipes.wrapper.routing.SpOutputCollector;
-import org.apache.streampipes.wrapper.standalone.manager.ProtocolManager;
-import org.apache.streampipes.wrapper.standalone.routing.StandaloneSpOutputCollector;
+import org.apache.streampipes.wrapper.standalone.ProcessorParams;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -56,9 +54,15 @@ public class TestBooleanCounterProcessor {
     @org.junit.runners.Parameterized.Parameters
     public static Iterable<Object[]> data() {
         return Arrays.asList(new Object[][]{
-                {"Test", 0, Arrays.asList(false, true), 1},
-                {"Test", 0, Arrays.asList(false, true, false), 2},
-                {"Test", 0, Arrays.asList(false), 0},
+                {"Test", "BOTH", Arrays.asList(false, true), 1},
+                {"Test", "BOTH", Arrays.asList(false, true, false), 2},
+                {"Test", "BOTH", Arrays.asList(false), 0},
+                {"Test", "TRUE -> FALSE", Arrays.asList(false, true, false, false, true), 2},
+                {"Test", "TRUE -> FALSE", Arrays.asList(true, false), 1},
+                {"Test", "TRUE -> FALSE", Arrays.asList(false), 1},
+                {"Test", "FALSE -> TRUE", Arrays.asList(false), 0},
+                {"Test", "FALSE -> TRUE", Arrays.asList(false,false,true), 1},
+                {"Test", "FALSE -> TRUE", Arrays.asList(false,true,true,false), 1},
         });
     }
 
@@ -72,7 +76,7 @@ public class TestBooleanCounterProcessor {
      * 2: FALSE -> TRUE
      */
     @org.junit.runners.Parameterized.Parameter(1)
-    public Integer flankUp;
+    public String flankUp;
 
     @org.junit.runners.Parameterized.Parameter(2)
     public List<Boolean> eventBooleans;
@@ -82,9 +86,9 @@ public class TestBooleanCounterProcessor {
 
 
     @Test
-    public void testTrend() {
-        final Integer[] actualMatchCount = {0};
-        DataProcessorDescription originalGraph = new BooleanCounterController().declareModel();
+    public void testBooleanCounter() {
+        BooleanCounterProcessor booleanCounter = new BooleanCounterProcessor();
+        DataProcessorDescription originalGraph = booleanCounter.declareModel();
         originalGraph.setSupportedGrounding(EventGroundingGenerator.makeDummyGrounding());
 
         DataProcessorInvocation graph =
@@ -98,7 +102,17 @@ public class TestBooleanCounterProcessor {
 
         graph.getOutputStream().getEventGrounding().getTransportProtocol().getTopicDefinition()
                 .setActualTopicName("output-topic");
-        BooleanCounterParameters params = new BooleanCounterParameters(graph, "s0::Test", flankUp);
+
+        graph.getStaticProperties().stream()
+                .filter(p -> p instanceof MappingPropertyUnary)
+                .map((p -> (MappingPropertyUnary) p))
+                .filter(p -> p.getInternalName().equals(BooleanCounterProcessor.FIELD_ID))
+                .findFirst().get().setSelectedProperty("s0::"+invertFieldName);
+        ProcessorParams params = new ProcessorParams(graph);
+        params.extractor().getStaticPropertyByName("flank", OneOfStaticProperty.class).getOptions()
+                .stream().filter(ot -> ot.getName().equals(flankUp)).findFirst()
+                .get().setSelected(true);
+
 
         SpOutputCollector spOut = new SpOutputCollector() {
             @Override
@@ -127,11 +141,10 @@ public class TestBooleanCounterProcessor {
             }
         };
 
-        BooleanCounter bc = new BooleanCounter();
-        bc.onInvocation(params, spOut, null);
+        booleanCounter.onInvocation(params,spOut,null);
 
 
-        Integer counter = sendEvents(bc, spOut);
+        Integer counter = sendEvents(booleanCounter, spOut);
 
         LOG.info("Expected match count is {}", expectedBooleanCount);
         LOG.info("Actual match count is {}", counter);
@@ -139,19 +152,19 @@ public class TestBooleanCounterProcessor {
     }
 
 
-    private Integer sendEvents(BooleanCounter trend, SpOutputCollector spOut) {
+    private Integer sendEvents(BooleanCounterProcessor booleanCounter, SpOutputCollector spOut) {
         int counter = 0;
         List<Event> events = makeEvents();
         for (Event event : events) {
-            LOG.info("Sending event with value " + event.getFieldBySelector("s0::Test"));
-            trend.onEvent(event, spOut);
+            LOG.info("Sending event with value " + event.getFieldBySelector("s0::"+invertFieldName));
+            booleanCounter.onEvent(event, spOut);
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
             try {
-                counter = event.getFieldBySelector(BooleanCounterController.COUNT_FIELD_RUNTIME_NAME).getAsPrimitive().getAsInt();
+                counter = event.getFieldBySelector(BooleanCounterProcessor.COUNT_FIELD_RUNTIME_NAME).getAsPrimitive().getAsInt();
             } catch (IllegalArgumentException e) {
 
             }
