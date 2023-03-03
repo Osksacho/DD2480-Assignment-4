@@ -25,11 +25,13 @@ import org.apache.streampipes.model.runtime.Event;
 import org.apache.streampipes.model.runtime.EventFactory;
 import org.apache.streampipes.model.runtime.SchemaInfo;
 import org.apache.streampipes.model.runtime.SourceInfo;
+import org.apache.streampipes.model.staticproperty.MappingPropertyUnary;
 import org.apache.streampipes.test.generator.EventStreamGenerator;
 import org.apache.streampipes.test.generator.InvocationGraphGenerator;
 import org.apache.streampipes.test.generator.grounding.EventGroundingGenerator;
 import org.apache.streampipes.wrapper.routing.SpOutputCollector;
 
+import org.apache.streampipes.wrapper.standalone.ProcessorParams;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -74,7 +76,8 @@ public class TestBooleanInverterProcessor {
 
     @Test
     public void testBoolenInverter() {
-        DataProcessorDescription originalGraph = new BooleanInverterController().declareModel();
+        BooleanInverterProcessor bip = new BooleanInverterProcessor();
+        DataProcessorDescription originalGraph =  bip.declareModel();
         originalGraph.setSupportedGrounding(EventGroundingGenerator.makeDummyGrounding());
 
         DataProcessorInvocation graph =
@@ -88,7 +91,13 @@ public class TestBooleanInverterProcessor {
 
         graph.getOutputStream().getEventGrounding().getTransportProtocol().getTopicDefinition()
                 .setActualTopicName("output-topic");
-        BooleanInverterParameters params = new BooleanInverterParameters(graph, "s0::" + invertFieldName);
+
+        graph.getStaticProperties().stream()
+                .filter(p -> p instanceof MappingPropertyUnary)
+                .map((p -> (MappingPropertyUnary) p))
+                .filter(p -> p.getInternalName().equals(BooleanInverterProcessor.INVERT_FIELD_ID))
+                .findFirst().get().setSelectedProperty("s0::"+invertFieldName);
+        ProcessorParams params = new ProcessorParams(graph);
 
         SpOutputCollector spOut = new SpOutputCollector() {
             @Override
@@ -117,11 +126,10 @@ public class TestBooleanInverterProcessor {
             }
         };
 
-        BooleanInverter bc = new BooleanInverter();
-        bc.onInvocation(params, spOut, null);
+        bip.onInvocation(params, spOut, null);
 
 
-        boolean result = sendEvents(bc, spOut);
+        boolean result = sendEvents(bip, spOut);
 
         LOG.info("Expected boolean is {}", expectedBooleanCount);
         LOG.info("Actual boolean is {}", result);
@@ -129,7 +137,7 @@ public class TestBooleanInverterProcessor {
     }
 
 
-    private boolean sendEvents(BooleanInverter trend, SpOutputCollector spOut) {
+    private boolean sendEvents(BooleanInverterProcessor trend, SpOutputCollector spOut) {
         boolean result = false;
         List<Event> events = makeEvents();
         for (Event event : events) {
